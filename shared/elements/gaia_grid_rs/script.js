@@ -250,5 +250,5 @@ window.GaiaGrid = (function(win) {
     <content></content>`;
 
   // Register and return the constructor
-  return document.registerElement('gaia-grid', { prototype: proto });
+  return document.registerElement('gaia-grid-rs', { prototype: proto });
 })(window);
