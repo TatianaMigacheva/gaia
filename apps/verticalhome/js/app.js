@@ -359,7 +359,7 @@
           // so the property is written as inline way.
           //
           // 'transform 0.25s' is from the original property in gaia-grid.
-          // ( shared/elements/gaia_grid/style.css )
+          // ( shared/elements/gaia_grid_rs/style.css )
           //
           // 'height 0s 0.5s' is to apply collapsing animation in edit mode.
           this.grid.style.transition = this.EDIT_MODE_TRANSITION_STYLE;
