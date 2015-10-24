@@ -34,6 +34,8 @@
     elemList: null,
     prevVerticalKey: null,
 
+    middleElem: false,
+
 
     /**
      * This function reset all pinns to default values.
@@ -62,7 +64,9 @@
       }
 
       this.elements[this.selectedElemIndex].classList.add('selected');
+      this.elements[this.selectedElemIndex].classList.add('middle');
       this.elemList.removeAttribute('style');
+      this.middleElem = true;
 
       var toRemoved = this.elemList.querySelector('.removed');
       var toRemoveOutFocus = this.elemList.querySelector('.out-focus');
@@ -98,6 +102,8 @@
       }
 
       this.elements[this.selectedElemIndex].classList.add('selected');
+        this.elements[this.selectedElemIndex].classList.add('middle');
+        this.middleElem = true;
     },
 
 
@@ -125,6 +131,12 @@
         e.preventDefault();
       }
 
+      if (this.middleElem){
+        document.querySelector('.middle').classList.remove('middle');
+        this.middleElem = false;
+      }
+
+
       var toRemoved = this.elemList.querySelector('.removed');
       var toRemoveOutFocus = this.elemList.querySelector('.out-focus');
 
@@ -139,6 +151,8 @@
 
       switch(e.key) {
         case 'ArrowUp':
+
+          document.getElementById('clock').style.opacity = 0;
 
           if (this.elemList.dataset.scrollup) {
             this.elemList.style.top = this.elemList.dataset.scrollup;
@@ -189,6 +203,8 @@
 
         case 'ArrowDown':
 
+          document.getElementById('clock').style.opacity = 0;
+
           this.elements[this.selectedElemIndex].classList.remove('selected');
           if (this.selectedElemIndex == (this.elements.length - 3)) {
             if (!this.elemList.dataset.scrolldown) {
@@ -230,7 +246,12 @@
         case 'Accept':
 
           window.removeEventListener('keydown', this);
+
+          if (this.elements[this.selectedElemIndex].getAttribute('id') == "moreApps") {
+            app.showMoreApps();
+          } else {
           app.getAppByURL(this.elements[this.selectedElemIndex].dataset.manifesturl).launch();
+          }
 
           break;
       }
