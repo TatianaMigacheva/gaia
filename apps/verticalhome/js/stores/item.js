@@ -474,7 +474,7 @@
           if (thisItem.type === 'app') {
             var itemObj = this.applicationSource.mapToApp(thisItem);
             addIfUnique.call(this, itemObj);
-          } else if (thisItem.type === 'divider') {
+          }/* else if (thisItem.type === 'divider') {
             var divider = new GaiaGrid.Divider(thisItem);
             this._allItems.push(divider);
           } else if (thisItem.type === 'bookmark') {
@@ -483,7 +483,7 @@
           } else if (thisItem.type === 'collection') {
             var collection = new GaiaGrid.Collection(thisItem);
             addIfUnique.call(this, collection);
-          }
+          }*/
         }
 
         this.notifyReady();
