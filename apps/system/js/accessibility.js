@@ -1,5 +1,5 @@
 'use strict';
-/* global SettingsListener */
+/* global SettingsListener, ScreenManager */
 /* global AccessibilityQuicknavMenu */
 
 (function(exports) {
@@ -51,6 +51,13 @@
     HINTS_TIMEOUT: 2000,
 
     /**
+     * Default timeout value (in milliseconds) between the launch of the FTU and
+     * the time when screen reader instructions should be spoken.
+     * @type {Number}
+     */
+    FTU_STARTED_TIMEOUT: 15000,
+
+    /**
      * Current counter for button presses in short succession.
      * @type {Number}
      * @memberof Accessibility.prototype
@@ -84,6 +91,8 @@
       'accessibility.screenreader-volume': 1,
       'accessibility.screenreader-rate': 0,
       'accessibility.screenreader-captions': false,
+      'accessibility.screenreader-shade': false,
+      'accessibility.screenreader-ftu-timeout-seconds': 15,
       'accessibility.colors.enable': false,
       'accessibility.colors.invert': false,
       'accessibility.colors.grayscale': false,
@@ -130,11 +139,13 @@
       window.addEventListener('volumedown', this);
       window.addEventListener('logohidden', this);
       window.addEventListener('screenchange', this);
+      window.addEventListener('ftustarted', this);
 
       // Attach all observers.
       Object.keys(this.settings).forEach(function attach(settingKey) {
         SettingsListener.observe(settingKey, this.settings[settingKey],
           function observe(aValue) {
+            var oldValue = this.settings[settingKey];
             this.settings[settingKey] = aValue;
             switch (settingKey) {
               case 'accessibility.screenreader':
@@ -143,6 +154,9 @@
                   SettingsListener.getSettingsLock().set({
                     'accessibility.screenreader-show-settings': true
                   });
+                }
+                if (this.settings['accessibility.screenreader-shade']) {
+                  this.toggleShade(aValue, !aValue);
                 }
                 this.screen.classList.toggle('screenreader', aValue);
                 break;
@@ -167,6 +181,12 @@
                 }
                 break;
 
+              case 'accessibility.screenreader-shade':
+                if (this.settings['accessibility.screenreader']) {
+                  this.toggleShade(aValue, oldValue === aValue);
+                }
+                break;
+
               case 'accessibility.colors.invert':
               case 'accessibility.colors.grayscale':
               case 'accessibility.colors.contrast':
@@ -181,6 +201,9 @@
                   }
                   SettingsListener.getSettingsLock().set(gfxSetting);
                 }
+                break;
+              case 'accessibility.screenreader-ftu-timeout-seconds':
+                this.FTU_STARTED_TIMEOUT = 1000 * aValue;
                 break;
             }
           }.bind(this));
@@ -208,6 +231,16 @@
     resetSpeaking: function ar_resetSpeaking(aExpectedCompleteTimeStamp) {
       this.isSpeaking = false;
       this.expectedCompleteTimeStamp = aExpectedCompleteTimeStamp || 0;
+    },
+
+    toggleShade: function ar_toggleShage(aEnable, aSilent) {
+      if (ScreenManager) {
+        ScreenManager[aEnable ? 'turnShadeOn' : 'turnShadeOff']();
+      }
+      if (!aSilent) {
+        this.speak({ string: aEnable ? 'shadeToggleOn' : 'shadeToggleOff' },
+          null, {enqueue: true});
+      }
     },
 
     /**
@@ -238,6 +271,7 @@
       }
 
       this.reset();
+      this.disableFTUStartedTimeout();
 
       if (!this.isSpeaking && timeStamp > this.expectedCompleteTimeStamp) {
         this.cancelSpeech();
@@ -253,6 +287,47 @@
         'accessibility.screenreader':
           !this.settings['accessibility.screenreader']
       });
+    },
+
+    /**
+     * Announce screen reader FTU_STARTED_TIMEOUT milliseconds after the FTU is
+     * loaded if the user does not proceed beyond the first step.
+     * @param  {Object} aEvent an event object generated from FTU launcher.
+     */
+    handleFTUStarted: function ar_handleFTUStarted(aEvent) {
+      if (this.settings['accessibility.screenreader']) {
+        // Only set the FTU timeout if the screen reader is not enabled.
+        return;
+      }
+
+      window.addEventListener('ftustep', this);
+
+      this.FTUStartedTimeout = setTimeout(() => {
+        this.cancelSpeech();
+        this.reset();
+        this.announceScreenReader(() =>
+          this.resetSpeaking(aEvent.timeStamp +
+            this.REPEAT_BUTTON_PRESS + this.FTU_STARTED_TIMEOUT * 1000));
+      }, this.FTU_STARTED_TIMEOUT);
+    },
+
+    /**
+     * Disable a timeout before the screen reader starts speaking in FTU.
+     */
+    disableFTUStartedTimeout: function ar_disableFTUStartedTimeout() {
+      clearTimeout(this.FTUStartedTimeout);
+    },
+
+    /**
+     * Reset FTU timeout and stop any spoken instructions if the user steps to
+     * the next FTU screen.
+     */
+    handleFTUStep: function ar_handleFTUStep() {
+      this.disableFTUStartedTimeout();
+      this.cancelSpeech();
+      this.reset();
+
+      window.removeEventListener('ftustep', this);
     },
 
     /**
@@ -344,11 +419,25 @@
 
     handleAccessFuControl: function ar_handleAccessFuControls(aDetails) {
       this.cancelHints();
-      if (aDetails.eventType === 'quicknav-menu') {
-        if (!this.quicknav) {
-          this.quicknav = new AccessibilityQuicknavMenu();
-        }
-        this.quicknav.show();
+      switch (aDetails.eventType) {
+        case 'quicknav-menu':
+          if (!this.quicknav) {
+            this.quicknav = new AccessibilityQuicknavMenu();
+          }
+          this.quicknav.show();
+          break;
+        case 'toggle-shade':
+          SettingsListener.getSettingsLock().set({
+            'accessibility.screenreader-shade':
+            !this.settings['accessibility.screenreader-shade']
+          });
+          window.dispatchEvent(new CustomEvent('accessibility-action'));
+          break;
+        case 'toggle-pause':
+          this.speechSynthesizer.togglePause();
+          break;
+        default:
+          break;
       }
     },
 
@@ -387,6 +476,12 @@
           break;
         case 'logohidden':
           this.activateScreen();
+          break;
+        case 'ftustarted':
+          this.handleFTUStarted(aEvent);
+          break;
+        case 'ftustep':
+          this.handleFTUStep();
           break;
         case 'mozChromeEvent':
           switch (aEvent.detail.type) {
@@ -616,6 +711,14 @@
       }
     },
 
+    togglePause: function ss_togglePause() {
+      if (this.speech.paused) {
+        this.speech.resume();
+      } else if (this.speech.speaking) {
+        this.speech.pause();
+      }
+    },
+
     /**
      * Utter a message with a speechSynthesizer.
      * @param {?Array} aData A messages array to be localized.
@@ -638,6 +741,10 @@
 
       if (!aOptions.enqueue) {
         this.cancel();
+      }
+
+      if (this.speech.paused) {
+        this.speech.resume();
       }
 
       var sentence = this.buildUtterance(aData);

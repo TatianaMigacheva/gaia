@@ -1,5 +1,5 @@
 'use strict';
-/* global ItemStore, LazyLoader, Configurator, groupEditor */
+/* global ItemStore, LazyLoader, Configurator, groupEditor, PinNavigation */
 /* global requestAnimationFrame */
 
 (function(exports) {
@@ -15,6 +15,8 @@
   function App() {
     window.performance.mark('navigationLoaded');
     window.dispatchEvent(new CustomEvent('moz-chrome-dom-loaded'));
+    this.clockTime = document.getElementById('clock-time');
+    this.date = document.getElementById('date');
     this.grid = document.getElementById('icons');
 
     this.grid.addEventListener('iconblobdecorated', this);
@@ -28,9 +30,6 @@
     window.addEventListener('hashchange', this);
     window.addEventListener('gaiagrid-saveitems', this);
     window.addEventListener('online', this.retryFailedIcons.bind(this));
-
-    var editModeDone = document.getElementById('exit-edit-mode');
-    editModeDone.addEventListener('click', this.exitEditMode);
 
     window.addEventListener('gaiagrid-dragdrop-begin', this);
     window.addEventListener('gaiagrid-dragdrop-finish', this);
@@ -47,12 +46,23 @@
 
     window.performance.mark('navigationInteractive');
     window.dispatchEvent(new CustomEvent('moz-chrome-interactive'));
+
+    var moreAppsButton = document.getElementById('moreAppsButton');
+    moreAppsButton.addEventListener('click', this.showMoreApps);
+
+    //temp button to back in main screen
+    var backToMainScreen = document.getElementById('backToMainScreen');
+    backToMainScreen.addEventListener('click', this.backToMainScreen);
   }
 
   App.prototype = {
 
     HIDDEN_ROLES: HIDDEN_ROLES,
     EDIT_MODE_TRANSITION_STYLE: EDIT_MODE_TRANSITION_STYLE,
+
+    inMoreApps: false,
+    pinManager: null,
+    clock: new Clock(),
 
     /**
      * Showing the correct icon is ideal but sometimes not possible if the
@@ -126,10 +136,19 @@
             window.dispatchEvent(new CustomEvent('moz-app-loaded'));
           });
       }.bind(this));
+
+      this.pinManager = new PinAppManager();
+      navigator.mozL10n.ready(this.l10nInit.bind(this));
+      window.addEventListener('pin-app-loaded', function(e) {
+        this.pinManager.init();
+
+        this.pinNavigation = new PinAppNavigation(document.getElementById('pin-apps-list'));
+        this.pinNavigation.points_selector = '#pin-apps-list .pin-app-item';
+      }.bind(this));
+
     },
 
     renderGrid: function() {
-      this.grid.setEditHeaderElement(document.getElementById('edit-header'));
       this.grid.render();
     },
 
@@ -139,6 +158,37 @@
 
     stop: function() {
       this.grid.stop();
+    },
+
+    getAppByURL: function(url) {
+      return this.itemStore.getAppByURL(url);
+    },
+
+    getPinAppList: function() {
+      return this.itemStore.getPinAppList();
+    },
+
+    savePinAppItem: function(obj) {
+      this.itemStore.savePinAppItem(obj);
+    },
+
+    savePinApps: function(objs) {
+      this.itemStore.savePinApps(objs);
+    },
+
+    showMoreApps: function() {
+      this.inMoreApps = true;
+      console.log("inMoreApps is : " + this.inMoreApps);
+      document.getElementById("main-screen").setAttribute("hidden","");
+      document.getElementById("more-apps-screen").removeAttribute("hidden");
+      window.scrollTo(0,0);
+    },
+
+    backToMainScreen: function() {
+      this.__proto__.inMoreApps = false;
+      console.log("inMoreApps is : " + this.inMoreApps);
+      document.getElementById("main-screen").removeAttribute("hidden");
+      document.getElementById("more-apps-screen").setAttribute("hidden","");
     },
 
     /**
@@ -157,14 +207,43 @@
       this.renderGrid();
     },
 
+
+    /**
+     * We need to do some refreshing thing after l10n is ready.
+     *
+     * @memberof LockScreen
+     * @this {LockScreen}
+     */
+    l10nInit: function ls_l10nInit() {
+      this.l10nready = true;
+      // The default one is 12 hour.
+      this.timeFormat = window.navigator.mozHour12 ?
+        navigator.mozL10n.get('shortTimeFormat12') :
+        navigator.mozL10n.get('shortTimeFormat24');
+      this.refreshClock(new Date());
+
+    },
+
+
+    refreshClock: function ls_refreshClock(now) {
+      var f = new navigator.mozL10n.DateTimeFormat();
+      var _ = navigator.mozL10n.get;
+
+      var timeFormat = this.timeFormat.replace('%p', '<span>%p</span>');
+      var dateFormat = _('longDateFormat');
+      this.clockTime.innerHTML = f.localeFormat(now, timeFormat);
+      this.date.textContent = f.localeFormat(now, dateFormat);
+    },
+
+
     /**
      * Called when we press 'Done' to exit edit mode.
      * Fires a custom event to use the same path as pressing the home button.
      */
-    exitEditMode: function(e) {
-      e.preventDefault();
-      window.dispatchEvent(new CustomEvent('hashchange'));
-    },
+//    exitEditMode: function(e) {
+//      e.preventDefault();
+//      window.dispatchEvent(new CustomEvent('hashchange'));
+//    },
 
     /**
      * General event handler.
@@ -327,7 +406,23 @@
         // A hashchange event means that the home button was pressed.
         // The system app changes the hash of the homescreen iframe when it
         // receives a home button press.
+        case 'timeformatchange':
+          if (!this.l10nready) {
+            return;
+          }
+
+          this.timeFormat = window.navigator.mozHour12 ?
+            navigator.mozL10n.get('shortTimeFormat12') :
+            navigator.mozL10n.get('shortTimeFormat24');
+          this.refreshClock(new Date());
+
+          break;
         case 'hashchange':
+
+          this.pinNavigation.reset();
+          this.clockTime.parentNode.style.opacity = 1;
+          this.clock.start(this.refreshClock.bind(this));
+
           // The group editor UI will be hidden by itself so returning...
           var editor = exports.groupEditor;
           if (editor && !editor.hidden) {
@@ -356,6 +451,9 @@
 
   // Dummy configurator
   exports.configurator = {
+    getPinApps: function() {
+      return [];
+    },
     getSingleVariantApp: function() {
       return {};
     },

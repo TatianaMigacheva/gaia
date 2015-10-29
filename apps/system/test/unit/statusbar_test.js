@@ -349,10 +349,16 @@ suite('system/Statusbar', function() {
   });
 
   suite('Statusbar should reflect fullscreen state', function() {
-    var app;
+    var app, appChromeElementId = 'test';
 
     setup(function() {
-      app = new MockAppWindow();
+      app = new MockAppWindow({
+        appChrome: {
+          element: { id: appChromeElementId, querySelector: sinon.stub() },
+          isMaximized: this.sinon.spy(),
+          useLightTheming: this.sinon.spy()
+        }
+      });
       MockService.currentApp = app;
       MockService.mTopMostWindow = app;
     });
@@ -366,24 +372,30 @@ suite('system/Statusbar', function() {
       this.sinon.stub(app, 'isFullScreen').returns(false);
       StatusBar.handleEvent(new CustomEvent('appopened', {detail: app}));
       assert.isFalse(StatusBar.element.classList.contains('fullscreen'));
+      assert.equal(StatusBar.element.getAttribute('aria-owns'),
+        appChromeElementId);
     });
 
     test('Launch a fullscreen app', function() {
       this.sinon.stub(app, 'isFullScreen').returns(true);
       StatusBar.handleEvent(new CustomEvent('appopened', {detail: app}));
       assert.isTrue(StatusBar.element.classList.contains('fullscreen'));
+      assert.isFalse(StatusBar.element.hasAttribute('aria-owns'));
     });
 
     test('Launch a fullscreen-layout app', function() {
       this.sinon.stub(app, 'isFullScreenLayout').returns(true);
       StatusBar.handleEvent(new CustomEvent('appopened', {detail: app}));
       assert.isTrue(StatusBar.element.classList.contains('fullscreen-layout'));
+      assert.isFalse(StatusBar.element.hasAttribute('aria-owns'));
     });
 
     test('Launch a non-fullscreen-layout app', function() {
       this.sinon.stub(app, 'isFullScreenLayout').returns(false);
       StatusBar.handleEvent(new CustomEvent('appopened', {detail: app}));
       assert.isFalse(StatusBar.element.classList.contains('fullscreen-layout'));
+      assert.equal(StatusBar.element.getAttribute('aria-owns'),
+        appChromeElementId);
     });
 
     test('Back to home should remove fullscreen state', function() {
@@ -395,6 +407,7 @@ suite('system/Statusbar', function() {
         { detail: home }));
       assert.isFalse(StatusBar.element.classList.contains('fullscreen'));
       assert.isFalse(StatusBar.element.classList.contains('fullscreen-layout'));
+      assert.isFalse(StatusBar.element.hasAttribute('aria-owns'));
     });
 
     test('Launch a fullscreen activity', function() {
@@ -2267,7 +2280,12 @@ suite('system/Statusbar', function() {
           return this._topWindow;
         },
         isFullScreen: function() {},
-        isFullScreenLayout: function() {}
+        isFullScreenLayout: function() {},
+        appChrome: {
+          element: { id: 'test', querySelector: sinon.stub() },
+          isMaximized: sinon.spy(),
+          useLightTheming: sinon.spy()
+        }
       };
       Service.currentApp = currentApp;
       var evt = new CustomEvent(event, {detail: currentApp});

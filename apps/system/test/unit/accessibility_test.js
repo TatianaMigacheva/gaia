@@ -1,20 +1,22 @@
 'use strict';
 /* global MocksHelper, MockSpeechSynthesis, MockSpeechSynthesisUtterance,
-          Accessibility, SettingsListener, MockL10n */
+          Accessibility, SettingsListener, MockL10n, ScreenManager */
 
 requireApp('system/shared/test/unit/mocks/mock_settings_listener.js');
+requireApp('system/test/unit/mock_screen_manager.js');
 requireApp('system/test/unit/mock_speech_synthesis.js');
 requireApp('system/js/accessibility.js');
 requireApp('system/js/accessibility_quicknav_menu.js');
 require('/shared/test/unit/mocks/mock_l10n.js');
 
 var mocksForA11y = new MocksHelper([
-  'SettingsListener'
+  'SettingsListener',
+  'ScreenManager'
 ]).init();
 
 suite('system/Accessibility', function() {
 
-  var accessibility, speechSynthesizer;
+  var accessibility, speechSynthesizer, screenNode;
 
   var vcChangeKeyDetails = {
     eventType: 'vc-change',
@@ -60,6 +62,15 @@ suite('system/Accessibility', function() {
     type: 'logohidden'
   };
 
+  var fakeFTUStarted = {
+    type: 'ftustarted',
+    timeStamp: Date.now()
+  };
+
+  var fakeFTUStep = {
+    type: 'ftustep'
+  };
+
   function getAccessFuOutput(aDetails) {
     return {
       type: 'mozChromeEvent',
@@ -100,6 +111,9 @@ suite('system/Accessibility', function() {
 
   mocksForA11y.attachTestHelpers();
   setup(function() {
+    screenNode = document.createElement('div');
+    screenNode.id = 'screen';
+    document.body.appendChild(screenNode);
     accessibility = new Accessibility();
     accessibility.start();
     speechSynthesizer = accessibility.speechSynthesizer;
@@ -111,6 +125,7 @@ suite('system/Accessibility', function() {
 
   teardown(function() {
     navigator.mozL10n = realL10n;
+    screenNode.parentNode.removeChild(screenNode);
   });
 
   test('logohidden handler', function() {
@@ -118,6 +133,67 @@ suite('system/Accessibility', function() {
       'activateScreen');
     accessibility.handleEvent(fakeLogoHidden);
     assert.isTrue(stubActivateScreen.called);
+  });
+
+  suite('ftu events', function() {
+    test('ftustarted handler', function() {
+      var stubHandleFTUStarted = this.sinon.stub(accessibility,
+        'handleFTUStarted');
+      accessibility.handleEvent(fakeFTUStarted);
+      assert.isTrue(stubHandleFTUStarted.calledWith(fakeFTUStarted));
+    });
+
+    test('ftustep handler', function() {
+      var stubHandleFTUStep = this.sinon.stub(accessibility, 'handleFTUStep');
+      accessibility.handleEvent(fakeFTUStep);
+      assert.isTrue(stubHandleFTUStep.called);
+    });
+
+    test('handleFTUStep', function() {
+      var stubReset = this.sinon.stub(accessibility, 'reset');
+      var stubCancelSpeech = this.sinon.stub(accessibility, 'cancelSpeech');
+      var stubDisableFTUStartedTimeout = this.sinon.stub(accessibility,
+        'disableFTUStartedTimeout');
+      var stubRemoveEventListener = this.sinon.stub(window,
+        'removeEventListener');
+
+      accessibility.handleFTUStep();
+      assert.isTrue(stubReset.called);
+      assert.isTrue(stubCancelSpeech.called);
+      assert.isTrue(stubDisableFTUStartedTimeout.called);
+      assert.isTrue(stubRemoveEventListener.calledWith('ftustep',
+        accessibility));
+    });
+
+    test('handleFTUStarted screen reader turned off', function(done) {
+      var stubReset = this.sinon.stub(accessibility, 'reset');
+      var stubCancelSpeech = this.sinon.stub(accessibility, 'cancelSpeech');
+      var stubAddEventListener = this.sinon.stub(window, 'addEventListener');
+      var stubAnnounceScreenReader = this.sinon.stub(accessibility,
+        'announceScreenReader');
+      SettingsListener.mTriggerCallback('accessibility.screenreader', false);
+      accessibility.FTU_STARTED_TIMEOUT = 0;
+
+      accessibility.handleFTUStarted();
+      assert.isTrue(stubAddEventListener.calledWith('ftustep', accessibility));
+      // Wait until the FTU_STARTED_TIMEOUT expires.
+      setTimeout(() => {
+        assert.isTrue(stubReset.called);
+        assert.isTrue(stubCancelSpeech.called);
+        assert.isTrue(stubAnnounceScreenReader.called);
+        done();
+      }, 10);
+    });
+
+    test('handleFTUStarted screen reader turned on', function() {
+      var stubAddEventListener = this.sinon.stub(window, 'addEventListener');
+      SettingsListener.mTriggerCallback('accessibility.screenreader', true);
+
+      accessibility.handleFTUStarted();
+      assert.isFalse(stubAddEventListener.called);
+      // Turn the screen reader back off.
+      SettingsListener.mTriggerCallback('accessibility.screenreader', false);
+    });
   });
 
   suite('handle volume button events', function() {
@@ -148,12 +224,15 @@ suite('system/Accessibility', function() {
     test('announce screen reader', function() {
       var stubAnnounceScreenReader = this.sinon.stub(accessibility,
         'announceScreenReader');
+      var stubDisableFTUStartedTimeout = this.sinon.stub(accessibility,
+        'disableFTUStartedTimeout');
       // Toggle volume up + volume down sequence three times.
       for (var i = 0; i < 3; ++i) {
         accessibility.handleEvent(getVolumeUp());
         accessibility.handleEvent(getVolumeDown());
       }
       assert.isTrue(stubAnnounceScreenReader.called);
+      assert.isTrue(stubDisableFTUStartedTimeout.called);
     });
   });
 
@@ -361,6 +440,56 @@ suite('system/Accessibility', function() {
         assert.isTrue(stubSpeak.called);
       });
 
+    });
+  });
+
+  suite('screenreader shade', function() {
+    test('turn shade on when screenreader is off', function() {
+      var stubTurnShadeOn = this.sinon.stub(ScreenManager, 'turnShadeOn');
+      var stubSpeak = this.sinon.stub(accessibility, 'speak');
+      SettingsListener.mTriggerCallback(
+        'accessibility.screenreader-shade', true);
+      assert.isFalse(stubTurnShadeOn.called);
+      assert.isFalse(stubSpeak.called);
+      SettingsListener.mTriggerCallback(
+        'accessibility.screenreader-shade', false);
+      assert.isFalse(stubSpeak.called);
+    });
+
+    test('turn shade on when screenreader is on', function() {
+      var stubSpeak = this.sinon.stub(accessibility, 'speak');
+      var stubTurnShadeOn = this.sinon.stub(ScreenManager, 'turnShadeOn');
+      SettingsListener.mTriggerCallback('accessibility.screenreader', true);
+      SettingsListener.mTriggerCallback(
+        'accessibility.screenreader-shade', true);
+      assert.isTrue(stubTurnShadeOn.called);
+      assert.isTrue(stubSpeak.called);
+      var stubTurnShadeOff = this.sinon.stub(ScreenManager, 'turnShadeOff');
+      SettingsListener.mTriggerCallback(
+        'accessibility.screenreader-shade', false);
+      assert.isTrue(stubTurnShadeOff.called);
+      assert.isTrue(stubSpeak.calledTwice);
+      SettingsListener.mTriggerCallback('accessibility.screenreader', false);
+    });
+
+    test('turn screenreader on and off when shade is on', function() {
+      var stubTurnShadeOn = this.sinon.stub(ScreenManager, 'turnShadeOn');
+      var stubSpeak = this.sinon.stub(accessibility, 'speak');
+      SettingsListener.mTriggerCallback(
+        'accessibility.screenreader-shade', true);
+      assert.isFalse(stubTurnShadeOn.called);
+      SettingsListener.mTriggerCallback('accessibility.screenreader', true);
+      // If shade is on, it is announced after the screen reader turns on
+      var stubTurnShadeOff = this.sinon.stub(ScreenManager, 'turnShadeOff');
+      assert.isTrue(stubSpeak.calledOnce);
+      assert.isTrue(stubTurnShadeOn.called);
+      SettingsListener.mTriggerCallback('accessibility.screenreader', false);
+      assert.isTrue(stubTurnShadeOff.called);
+      SettingsListener.mTriggerCallback(
+        'accessibility.screenreader-shade', false);
+      // We should not get a speak if the screen reader is toggled off before
+      // the shade
+      assert.isTrue(stubSpeak.calledOnce);
     });
   });
 });
